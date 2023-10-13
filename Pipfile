@@ -1,0 +1,20 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+cython = "<3.0.0"
+web3 = "*"
+pycoingecko = "*"
+python-decouple = "*"
+pandas = "*"
+matplotlib = "*"
+urllib3 = "*"
+
+[dev-packages]
+ipykernel = "*"
+
+[requires]
+python_version = "3.11"
+python_full_version = "3.11.4"
