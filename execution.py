@@ -49,6 +49,7 @@ class ArbBotBase(Pricing):
         self.change_mode(0, True, self.create_contract_instances)
         self.profit_threshold = self.w3.to_wei(profit_threshold, "ether")
 
+    # Function that retrieves the correct swapping function based on the pool address
     def func_for_exchange(self, pool):
         mapping = {
             43114: {
@@ -59,6 +60,7 @@ class ArbBotBase(Pricing):
         }
         return mapping[self.chain_id][pool]
 
+    # Function allows the bot to switch between a local forked network or mainnet. 
     def change_mode(self, new_mode, switch_back, contract_func=None, *args):
         initial_mode = self.mode
         if new_mode == self.mode:
@@ -117,6 +119,7 @@ class ArbBotBase(Pricing):
                 return response if contract_func is not None else None
 
     def start_ganache_node(self, gas_price):
+        # Spin up a daemon version of ganche
         sub_process_response = subprocess.run(
             f"npx ganache --fork {self.mainnet_endpoint} -q -g {gas_price} --wallet.deterministic --detach -e 100000",
             shell=True,
@@ -130,7 +133,7 @@ class ArbBotBase(Pricing):
 
     # Retrieves list of active index assets
     def get_index_anatomy(self):
-        # Retrieve PDI anatomy
+        # Retrieve index anatomy
         assets, weights = self.index_token_contract.functions.anatomy().call()
         # Zip asset and weights lists together
         zipped_list = list(zip(assets, weights))
@@ -140,9 +143,8 @@ class ArbBotBase(Pricing):
         inactive_assets = self.index_token_contract.functions.inactiveAnatomy().call()
         return inactive_assets
 
-    # eth_amount should be in wei
+    # Amount should be in wei
     def mint(self, amount, flag="CALL"):
-        # Checksum recipient address
         recipient = self.address
         # Retrieve index anatomy
         anatomy = self.get_index_anatomy()
@@ -152,6 +154,7 @@ class ArbBotBase(Pricing):
         amount_remaining = amount
         # Retrieve quote for each asset from 0x API
         for asset, weight in anatomy:
+            # Sleep to avoid API rate limiting
             time.sleep(1)
             query_params = {
                 "enableSlippageProtection": "true",
@@ -170,6 +173,7 @@ class ArbBotBase(Pricing):
                 )
                 amount_remaining -= query_params["sellAmount"]
             else:
+                # Directly create quote bypassing 0x API request since no swap is required
                 quote = {
                     "asset": self.w3.to_checksum_address(self.wrapped_native_address),
                     "buyAssetMinAmount": amount_remaining
@@ -185,7 +189,7 @@ class ArbBotBase(Pricing):
                 amount_remaining -= quote["buyAssetMinAmount"]
                 mint_quote_params.append(quote)
                 continue
-            # Query 0x api
+            # Query 0x API
             zero_ex_quote = requests.get(
                 self.zero_ex_base_url,
                 query_params,
@@ -246,15 +250,14 @@ class ArbBotBase(Pricing):
             )
             return built_transaction
 
-    # pdi_amount in wei
+    # Index amount should be in wei
     def burn(self, index_amount, flag="CALL"):
-        # Checksum recipient address
         recipient = self.address
         # Retrieve active assets
         assets = self.get_index_anatomy()
         # Remove weights and add inactive assets
         assets = [i[0] for i in assets] + self.get_inactive_assets()
-        # Retrieve sell amounts of constituent based on the amount of PDI burnt
+        # Retrieve sell amounts of constituent based on the amount of index tokens burned
         constituent_sell_amounts = (
             self.index_router_contract.functions.burnTokensAmount(
                 self.w3.to_checksum_address(self.index_address), index_amount
@@ -266,6 +269,7 @@ class ArbBotBase(Pricing):
         # List to hold BurnQuoteParams structs
         burn_quote_params = []
         for asset, sell_amount in zipped_list:
+            # Sleep to avoid API rate limiting
             time.sleep(1)
             if sell_amount == 0 or asset == self.wrapped_native_address:
                 quote = {
@@ -319,7 +323,7 @@ class ArbBotBase(Pricing):
         }
         # Determine desired return outcome based on flag
         if flag.upper() == "CALL":
-            # Get output from burn
+            # Call static burn to get output
             call_static = self.index_router_contract.functions.burnSwapValue(
                 burn_swap_params
             ).call()
@@ -370,10 +374,7 @@ class ArbBotBase(Pricing):
             return response_dict
 
     def set_allowances(self, amount, contract_object, owner, spender):
-        # Check decimals of token contract
-        decimals = contract_object.functions.decimals().call()
-        # Convert amount into wei
-        amount = 2**256 - 1 if amount == "inf" else int(amount * 10**decimals)
+        amount = 2**256 - 1 if amount == "inf" else amount
         # Build transaction to set allowance to infinity
         build_transaction = contract_object.functions.approve(
             spender, 2**256 - 1
@@ -381,6 +382,7 @@ class ArbBotBase(Pricing):
         return build_transaction
 
     def preflight_checks(self):
+        # Run these transactions to set up forked environment - (allowances and asset balances)
         self.execute_transaction(
             self.set_allowances(
                 "inf",
@@ -474,8 +476,11 @@ class ArbBotBase(Pricing):
     def calculate_trade_size(self, premium, exchange):
         assert type(premium) == bool, "Premium must be bool"
         if premium:
+            # Retrieve the correct function for calcualting the optimal trade size based on the pool address
             calc_trade_size_func = self.get_trade_size_mapping(exchange)
+            # Get the function used to execute trades on the given pool address
             trading_func = self.func_for_exchange(exchange)
+            # Get the optimal trade size
             trade_size = calc_trade_size_func(
                 exchange,
                 self.get_nav_price(self.get_price_mapping(exchange)[0]),
@@ -509,8 +514,11 @@ class ArbBotBase(Pricing):
                 )
                 return trade_size
         else:
+            # Retrieve the correct function for calcualting the optimal trade size based on the pool address
             calc_trade_size_func = self.get_trade_size_mapping(exchange)
+            # Get the function used to execute trades on the given pool address
             trading_func = self.func_for_exchange(exchange)
+            # Get the optimal trade size
             trade_size = calc_trade_size_func(
                 exchange,
                 self.get_nav_price(self.get_price_mapping(exchange)[0]),
@@ -544,6 +552,7 @@ class ArbBotBase(Pricing):
         gas_cost_in_eth = (leg_1 + leg_2) * self.w3.eth.gas_price / 1e18
         return gas_cost_in_eth
 
+    # Function for wrapping and unwrapping the native token
     def wrapped_native(self, amount, is_wrap):
         assert type(is_wrap) == bool, "Please enter a bool"
         if is_wrap:
@@ -577,9 +586,11 @@ class ArbBotBase(Pricing):
 
     def swap_via_uniswap(self, pool, amount, is_buy, flag="CALL"):
         assert type(is_buy) == bool,"Param should be bool"
+        # Instantiate contract address
         uniswap_router_contract = self.w3.eth.contract(
             address=config.uniswap_swap_router, abi=abis.uniswap_swap_router
         )
+        # Create struct
         exact_input_single_params = {}
         exact_input_single_params["tokenIn"] = (
             self.wrapped_native_address if is_buy else self.index_address
@@ -596,6 +607,7 @@ class ArbBotBase(Pricing):
         exact_input_single_params["amountOutMinimum"] = 0
         exact_input_single_params["sqrtPriceLimitX96"] = 0
         if flag.upper() == "CALL":
+            # Call static for output 
             call_static = uniswap_router_contract.functions.exactInputSingle(
                 exact_input_single_params
             ).call({"value": amount if is_buy else 0})
@@ -625,9 +637,11 @@ class ArbBotBase(Pricing):
 
     def swap_via_trader_joe(self, pool, amount, is_buy, flag="CALL"):
         assert type(is_buy) == bool,"Param should be bool"
+        # Instantiate contract instance
         trader_joe_router = self.w3.eth.contract(
             address=config.trader_joe_router, abi=abis.trader_joe_router
         )
+        # Create params and struct
         amountOutMin = 0
         path = {
             "pairBinSteps": [50] if pool == config.cai_tj_v2_pool else [0],
@@ -640,6 +654,7 @@ class ArbBotBase(Pricing):
         deadline = self.w3.eth.get_block("latest")["timestamp"] + 10000
         if is_buy:
             if flag.upper() == "CALL":
+                # Call static for output
                 call_static = trader_joe_router.functions.swapExactNATIVEForTokens(
                     amountOutMin, path, to, deadline
                 ).call({"value": amount})
@@ -670,6 +685,7 @@ class ArbBotBase(Pricing):
                 return built_transaction
         else:
             if flag.upper() == "CALL":
+                # Call static for output
                 call_static = trader_joe_router.functions.swapExactTokensForNATIVE(
                     amount, amountOutMin, path, to, deadline
                 ).call()
@@ -702,6 +718,7 @@ class ArbBotBase(Pricing):
         return self.w3.eth.gas_price
 
     def select_arb_type(self, exchange_address):
+        # Get delta between NAV and exchange price
         delta = super().get_price_delta(exchange_address)
         print(f"Current price delta is {delta}")
         if delta > 0:
@@ -743,7 +760,7 @@ class ArbBotBase(Pricing):
                 return
             # Get native asset balance before arb
             native_balance_before = self.get_total_native_balance(True)
-            # Get PDI balance before
+            # Get index balance before
             index_balance_before = self.retrieve_index_balance(True)
             # Execute swap transaction
             trading_func = self.func_for_exchange(exchange_address)
@@ -752,15 +769,15 @@ class ArbBotBase(Pricing):
             )
             if tx1["status"] == False:
                 return
-            # Retrieve PDI balance
+            # Retrieve index balance after
             index_balance_after = self.retrieve_index_balance(True)
-            # Calculate net PDI gained
+            # Calculate net index tokens gained
             diff = index_balance_after - index_balance_before
             # Execute burn transaction
             tx2 = self.execute_transaction(self.burn(diff, flag="build"))
             if tx2["status"] == False:
                 return
-            # Get ETH balance after arb
+            # Get native balance after arb
             native_balance_after = self.get_total_native_balance(True)
             profit = native_balance_after - native_balance_before
             return profit
@@ -789,6 +806,7 @@ class ArbBotBase(Pricing):
 
 while True:
     if sys.argv[1] == "dev":
+        # Create instances of the arb bot that run on the local forked network
         arb_bot_avax = ArbBotBase(
             0,
             43114,
@@ -818,6 +836,7 @@ while True:
         print("Arb bot will retry in 60 minutes")
         time.sleep(3600)
     elif sys.argv[1] == "prod":
+        # Create instances of the arb bot that run on mainnet
         arb_bot_avax = ArbBotBase(
             1,
             43114,

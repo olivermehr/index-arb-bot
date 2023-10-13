@@ -42,6 +42,7 @@ class Pricing:
         return mapping.get(self.chain_id)
 
     def get_price_mapping(self, pool):
+        # Get pricing function given a pool address
         mapping = {
             43114: {
                 "0xE5e9d67e93aD363a50cABCB9E931279251bBEFd0": [
@@ -63,6 +64,7 @@ class Pricing:
         return mapping[self.chain_id][pool]
 
     def get_trade_size_mapping(self, pool):
+        # Returns the correct trade size function for calculating the optimal trade given a pool address
         mapping = {
             43114: {
                 "0xE5e9d67e93aD363a50cABCB9E931279251bBEFd0": self.calculate_tj_v1_trade_size,
@@ -100,6 +102,7 @@ class Pricing:
         assert type(premium) == bool, "is_buy param should be bool"
         pool_contract = self.w3.eth.contract(address=pool, abi=abis.trader_joe_v2)
         if premium:
+            # If premium is true we need to convert the swap in amount to native tokens
             swap_in_amount, _, _ = pool_contract.functions.getSwapIn(
                 amount, premium
             ).call()
@@ -175,6 +178,7 @@ class Pricing:
         delta_x = new_x - x
         delta_y = new_y - y
         if premium:
+            # If premium is true we need to convert the swap in amount to native tokens
             if delta_x > 0:
                 convert_to_avax = int(
                     (delta_x * self.get_nav_price()) / self.get_native_price()
